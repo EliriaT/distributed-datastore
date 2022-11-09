@@ -1,0 +1,40 @@
+networks:
+  cluster:
+    external: true
+services:
+  node1:
+    image: node
+    container_name: node1
+    volumes:
+      - /home/irina/UTM/SEM5/PR/LAB3/config_Node1:/app/config
+    networks:
+      - cluster
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+
+  node2:
+    image: node
+    container_name: node2
+    volumes:
+      - /home/irina/UTM/SEM5/PR/LAB3/config_Node2:/app/config
+    networks:
+      - cluster
+    ports:
+      - "8082:8082"
+    expose:
+      - "8082"
+
+  node3:
+    image: node
+    container_name: node3
+    volumes:
+      - /home/irina/UTM/SEM5/PR/LAB3/config_Node3:/app/config
+
+    networks:
+      - cluster
+    ports:
+      - "8084:8084"
+    expose:
+      - "8084"

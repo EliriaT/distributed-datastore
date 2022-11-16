@@ -20,7 +20,8 @@ func SendCommandToPeers(command Command) {
 	}
 }
 
-func SendTCPRequest(message []byte, servAddr string) {
+func SendTCPRequest(message []byte, servAddr string) Command {
+	var command Command
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", servAddr)
 	if err != nil {
@@ -39,15 +40,19 @@ func SendTCPRequest(message []byte, servAddr string) {
 		os.Exit(1)
 	}
 
-	reply := make([]byte, 1024)
+	buffer := make([]byte, 1024)
 
-	_, err = conn.Read(reply)
+	length, err := conn.Read(buffer)
 	if err != nil {
 		println("Write to server failed:", err.Error())
 		os.Exit(1)
 	}
 
-	println("Reply from server=", string(reply))
+	println("Reply from server=", string(buffer))
 
 	conn.Close()
+	buffer = buffer[:length]
+
+	err = json.Unmarshal(buffer, &command)
+	return command
 }

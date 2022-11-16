@@ -1,7 +1,8 @@
 {
+  "id": "3",
   "name":"node3",
   "my_addr": "http://node3",
-  "http_port": ":8080",
+  "http_port": ":8084",
   "udp_port": ":8829",
   "broadcast_addr": "172.19.255.255",
   "num_peers": "3",

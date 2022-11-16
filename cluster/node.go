@@ -19,6 +19,7 @@ import (
 var nodeInstance *Node
 
 type Node struct {
+	Id            int
 	Name          string
 	Peers         []Node
 	numPeers      int
@@ -29,11 +30,12 @@ type Node struct {
 	broadcastAddr string
 	IsLeader      bool
 	LeaderName    string
-	IpAddrs       string //maybe will need in future
-	TcpPort       string
+	//IpAddrs       string //maybe will need in future
+	TcpPort string
 }
 
 type Vote struct {
+	Id       int    `json:"id"`
 	NodeName string `json:"node_name"`
 	NodeAddr string `json:"node_addr"`
 	VoteInf  int    `json:"vote"`
@@ -42,6 +44,7 @@ type Vote struct {
 
 func (n *Node) VoteLeader() Vote {
 	return Vote{
+		Id:       n.Id,
 		NodeName: n.Name,
 		NodeAddr: n.NodeAddr,
 		VoteInf:  rand.Intn(3),
@@ -96,10 +99,20 @@ func (n *Node) handleTCPRequest(conn net.Conn) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	conn.Write([]byte("Received!\n"))
-	log.Printf("Command is %+v", toDoCommand)
+
+	log.Printf("Node %d received command %+v", n.Id, toDoCommand)
 	if toDoCommand.CommandType == SET {
 		store.NodeDataStore.SetValue(toDoCommand.Key, []byte(toDoCommand.Value))
+		conn.Write(buffer)
+	}
+	if toDoCommand.CommandType == GET {
+		value, err := store.NodeDataStore.GetValue(toDoCommand.Key)
+		if err != nil {
+			toDoCommand.Value = ""
+		}
+		toDoCommand.Value = string(value)
+		byteMsg, _ := json.Marshal(toDoCommand)
+		conn.Write(byteMsg)
 	}
 	store.NodeDataStore.PrintStoreContent()
 
@@ -175,6 +188,7 @@ func (n *Node) GetToKnowPeers(leader int, votes []Vote) {
 	for _, v := range votes {
 		if v.NodeName != myName {
 			node := Node{
+				Id:       v.Id,
 				Name:     v.NodeName,
 				NodeAddr: v.NodeAddr,
 				TcpPort:  v.TcpPort,
@@ -218,7 +232,9 @@ func GetNode() *Node {
 	if nodeInstance == nil {
 		config.Congif()
 		numPeers, _ := strconv.Atoi(config.NodeConfig["num_peers"])
+		id, _ := strconv.Atoi(config.NodeConfig["id"])
 		nodeInstance = &Node{
+			Id:            id,
 			Name:          config.NodeConfig["name"],
 			NodeAddr:      config.NodeConfig["my_addr"],
 			numPeers:      numPeers,

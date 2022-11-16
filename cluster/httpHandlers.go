@@ -3,6 +3,7 @@ package cluster
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/EliriaT/distributed-datastore/store"
 	"github.com/gorilla/mux"
 	"log"
@@ -10,16 +11,55 @@ import (
 )
 
 func GetObject(w http.ResponseWriter, r *http.Request) {
+	var value []byte
 	vars := mux.Vars(r)
 	key, ok := vars["key"]
 	if !ok {
 		http.Error(w, errors.New("wrong query name").Error(), http.StatusBadRequest)
 		return
 	}
-	value, err := store.NodeDataStore.GetValue(key)
+
+	peersCommand := Command{
+		Key:         key,
+		Value:       "",
+		CommandType: GET,
+	}
+
+	byteMsg, err := json.Marshal(peersCommand)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
+		log.Fatal(err)
+	}
+
+	originalNode, replicaNode := GetShardAndReplica(key)
+	var tcpAddres string
+
+	if originalNode.Id == GetNode().Id || replicaNode.Id == GetNode().Id {
+		value, err = store.NodeDataStore.GetValue(key)
+		if originalNode.Id == GetNode().Id {
+			tcpAddres = replicaNode.Name + replicaNode.TcpPort
+		} else {
+			tcpAddres = originalNode.Name + originalNode.TcpPort
+		}
+		if err != nil {
+			receivedCommand := SendTCPRequest(byteMsg, tcpAddres)
+			if receivedCommand.Value == "" {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			value = []byte(receivedCommand.Value)
+		}
+	} else {
+		receivedCommand := SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		if receivedCommand.Value == "" {
+			receivedCommand = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+			if receivedCommand.Value == "" {
+				http.Error(w, fmt.Errorf("No such value present with key %s", receivedCommand.Key).Error(), http.StatusNotFound)
+				return
+			}
+			value = []byte(receivedCommand.Value)
+		} else {
+			value = []byte(receivedCommand.Value)
+		}
 	}
 
 	response := struct {
@@ -47,16 +87,30 @@ func SetObject(w http.ResponseWriter, r *http.Request) {
 	}
 	value, ok := vars["value"]
 
-	store.NodeDataStore.SetValue(key, []byte(value))
-
-	store.NodeDataStore.PrintStoreContent()
-
 	peersCommand := Command{
 		Key:         key,
 		Value:       value,
 		CommandType: SET,
 	}
-	SendCommandToPeers(peersCommand)
+	byteMsg, err := json.Marshal(peersCommand)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	originalNode, replicaNode := GetShardAndReplica(key)
+
+	if originalNode.Id == GetNode().Id {
+		store.NodeDataStore.SetValue(key, []byte(value))
+		SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+	} else if replicaNode.Id == GetNode().Id {
+		store.NodeDataStore.SetValue(key, []byte(value))
+		SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+	} else {
+		SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+	}
+
+	store.NodeDataStore.PrintStoreContent()
 
 	response := struct {
 		Key   string `json:"key"`
@@ -65,7 +119,7 @@ func SetObject(w http.ResponseWriter, r *http.Request) {
 		Key:   key,
 		Value: value,
 	}
-	byteMsg, _ := json.Marshal(response)
+	byteMsg, _ = json.Marshal(response)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(byteMsg)
 

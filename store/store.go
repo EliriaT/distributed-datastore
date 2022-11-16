@@ -28,7 +28,7 @@ func (s *Store) SetValue(key string, value []byte) {
 
 func (s *Store) PrintStoreContent() {
 	log.Println("---------------------------------------")
-	log.Println(s.dataStore)
+	log.Println("Current store:  ", s.dataStore)
 	log.Println("---------------------------------------")
 }
 

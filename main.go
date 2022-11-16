@@ -29,3 +29,4 @@ func main() {
 }
 
 //172.19.255.255
+//docker run --name netshoot --rm -it --network cluster nicolaka/netshoot / bin/sh

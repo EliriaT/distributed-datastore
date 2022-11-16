@@ -1,6 +1,6 @@
 # distributed-datastore
 
- Simple distributed in-memory key-value datastore written in Go
+Very simple distributed in-memory key-value datastore written in Go
 
 1. To run the app in a docker container, first build the image:
 
@@ -9,3 +9,4 @@
 2. Then use docker compose:
 
 `docker compose up`
+

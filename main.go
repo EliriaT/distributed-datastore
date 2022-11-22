@@ -2,12 +2,14 @@ package main
 
 import (
 	"github.com/EliriaT/distributed-datastore/cluster"
+	"log"
 	"math/rand"
 	"sync"
 	"time"
 )
 
 func main() {
+	log.Println("-----------------------IT IS WORKING--------------------")
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	rand.Seed(time.Now().UnixNano())

@@ -2,7 +2,7 @@
   "id": "2",
   "name":"node2",
   "my_addr": "http://node2",
-  "http_port": ":8080",
+  "http_port": ":8082",
   "udp_port": ":8829",
   "broadcast_addr": "172.19.255.255",
   "num_peers": "3",

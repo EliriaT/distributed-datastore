@@ -9,6 +9,8 @@ services:
       - /home/irina/UTM/SEM5/PR/LAB3/config_Node1:/app/config
     networks:
       - cluster
+
+    restart: always
     ports:
       - "8080:8080"
     expose:
@@ -21,6 +23,7 @@ services:
       - /home/irina/UTM/SEM5/PR/LAB3/config_Node2:/app/config
     networks:
       - cluster
+    restart: always
     ports:
       - "8082:8082"
     expose:
@@ -34,6 +37,7 @@ services:
 
     networks:
       - cluster
+    restart: always
     ports:
       - "8084:8084"
     expose:

@@ -9,3 +9,4 @@ Extremely simple distributed in-memory key-value datastore written in Go
 2. Then use docker compose:
 
 `docker compose up`
+

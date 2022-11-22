@@ -19,13 +19,15 @@ func GetObject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	peersCommand := Command{
-		Key:         key,
-		Value:       "",
-		CommandType: GET,
+	peersCommand := DbCommand{
+		Key:   key,
+		Value: "",
 	}
+	toDoCommand := Command{
+		Action:  GET,
+		Payload: peersCommand}
 
-	byteMsg, err := json.Marshal(peersCommand)
+	byteMsg, err := json.Marshal(toDoCommand)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -41,24 +43,37 @@ func GetObject(w http.ResponseWriter, r *http.Request) {
 			tcpAddres = originalNode.Name + originalNode.TcpPort
 		}
 		if err != nil {
-			receivedCommand := SendTCPRequest(byteMsg, tcpAddres)
-			if receivedCommand.Value == "" {
+			receivedCommand, err2 := SendTCPRequest(byteMsg, tcpAddres)
+			// if there is an error, this means that the value can not be found
+			if err2 != nil {
 				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			value = []byte(receivedCommand.Value)
-		}
-	} else {
-		receivedCommand := SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
-		if receivedCommand.Value == "" {
-			receivedCommand = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
-			if receivedCommand.Value == "" {
-				http.Error(w, fmt.Errorf("No such value present with key %s", receivedCommand.Key).Error(), http.StatusNotFound)
+			dbCommand := convertFromMapToDbCommand(receivedCommand.Payload)
+			if dbCommand.Value == "" {
+				http.Error(w, err.Error(), http.StatusNotFound)
 				return
 			}
-			value = []byte(receivedCommand.Value)
+			value = []byte(dbCommand.Value)
+		}
+	} else {
+		receivedCommand, _ := SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+
+		dbCommand := convertFromMapToDbCommand(receivedCommand.Payload)
+		if dbCommand.Value == "" {
+			receivedCommand, err = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			dbCommand = convertFromMapToDbCommand(receivedCommand.Payload)
+			if dbCommand.Value == "" {
+				http.Error(w, fmt.Errorf("No such value present with key %s", dbCommand.Key).Error(), http.StatusNotFound)
+				return
+			}
+			value = []byte(dbCommand.Value)
 		} else {
-			value = []byte(receivedCommand.Value)
+			value = []byte(dbCommand.Value)
 		}
 	}
 
@@ -87,12 +102,15 @@ func SetObject(w http.ResponseWriter, r *http.Request) {
 	}
 	value, ok := vars["value"]
 
-	peersCommand := Command{
-		Key:         key,
-		Value:       value,
-		CommandType: SET,
+	peersCommand := DbCommand{
+		Key:   key,
+		Value: value,
 	}
-	byteMsg, err := json.Marshal(peersCommand)
+	toDoCommand := Command{
+		Action:  SET,
+		Payload: peersCommand}
+
+	byteMsg, err := json.Marshal(toDoCommand)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -120,6 +138,7 @@ func SetObject(w http.ResponseWriter, r *http.Request) {
 		Value: value,
 	}
 	byteMsg, _ = json.Marshal(response)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(byteMsg)
 

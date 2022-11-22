@@ -128,6 +128,7 @@ func (n *Node) StartServer() {
 //		conn.Close()
 //	}
 func (n *Node) ListenOnUDP(wg *sync.WaitGroup) {
+	var flag = make(chan int, 1500)
 	var votes []Vote
 	votes = make([]Vote, 0, 3)
 
@@ -136,29 +137,56 @@ func (n *Node) ListenOnUDP(wg *sync.WaitGroup) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer connection.Close()
+	//defer connection.Close()
 
 	//to try repeat only 3 time the for loop
-	for {
-		var vote Vote
-		buffer := make([]byte, 4096)
-		length, addr, _ := connection.ReadFromUDP(buffer)
-		//TODO check error
-		buffer = buffer[:length]
+	go func() {
+		for {
+			var vote Vote
+			buffer := make([]byte, 4096)
+			length, addr, err := connection.ReadFromUDP(buffer)
+			// error could have happened if the connection was closed and the function restarted
+			if err != nil {
+				return
+			}
+			buffer = buffer[:length]
 
-		err = json.Unmarshal(buffer, &vote)
-		if err != nil {
-			log.Fatal(err)
+			//err = json.Unmarshal(buffer, &vote)
+			//if err != nil {
+			//	log.Fatal(err)
+			//}
+
+			nodes, vote := unMarshalVoteOrPeersJSON(buffer)
+			if nodes == nil {
+				fmt.Printf("%s sent this: %+v\n", addr, vote)
+				votes = append(votes, vote)
+			} else {
+				n.Peers = nodes
+				flag <- 1
+			}
+
+			// check here if i am the leader, then send all the nodes currently available
+			// This happens if a peer was disconnected, and reconnected, started voting, but the leader will send all the peers
+			if n.IsLeader {
+				byteMsg, _ := json.Marshal(n.Peers)
+				n.SendBroadCastMessageUDP(byteMsg)
+			}
+
+			if len(votes) == n.numPeers {
+				flag <- 1
+			}
 		}
-		fmt.Printf("%s sent this: %+v\n", addr, vote)
-		votes = append(votes, vote)
-		if len(votes) == n.numPeers {
-			break
-		}
+	}()
+
+	<-flag
+	if len(n.Peers) > 0 {
+		wg.Done()
+		return
 	}
 	countVotes := make([]int, n.numPeers, n.numPeers)
 	max := 0
 	var leader = -1
+
 	for _, v := range votes {
 		countVotes[v.VoteInf]++
 		if countVotes[v.VoteInf] > max {
@@ -208,7 +236,7 @@ func (n *Node) GetToKnowPeers(leader int, votes []Vote) {
 	n.Peers = peers
 }
 
-func (n *Node) VoteLeaderBroadCastUDP() {
+func (n *Node) SendBroadCastMessageUDP(byteMsg []byte) {
 	time.Sleep(time.Duration(rand.Intn(1000)+300) * time.Millisecond)
 	broadcastAddress, err := net.ResolveUDPAddr("udp", n.broadcastAddr+n.udpPort)
 	if err != nil {
@@ -225,15 +253,15 @@ func (n *Node) VoteLeaderBroadCastUDP() {
 	}
 	defer connection.Close()
 
-	vote := n.VoteLeader()
-	byteMsg, err := json.Marshal(vote)
 	connection.Write(byteMsg)
 
 }
 
 func (n *Node) StartVotingProccess(wg *sync.WaitGroup) {
+	vote := n.VoteLeader()
+	byteMsg, _ := json.Marshal(vote)
 	go n.ListenOnUDP(wg)
-	n.VoteLeaderBroadCastUDP()
+	n.SendBroadCastMessageUDP(byteMsg)
 }
 
 func GetNode() *Node {

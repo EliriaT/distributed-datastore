@@ -1,5 +1,7 @@
 package cluster
 
+import "encoding/json"
+
 type Command struct {
 	Action  commandEnum `json:"action"`
 	Payload interface{} `json:"payload"`
@@ -120,4 +122,17 @@ func convertFromMapToAppendEntriesArgs(payload interface{}) AppendEntriesArgs {
 	}
 
 	return appendEntry
+}
+
+func unMarshalVoteOrPeersJSON(payload []byte) ([]Node, Vote) {
+	if payload[0] == '{' {
+		// We know it's a single object
+		var v Vote
+		_ = json.Unmarshal(payload, &v)
+		return nil, v
+	}
+	// Otherwise it's an array
+	var v []Node
+	_ = json.Unmarshal(payload, &v)
+	return v, Vote{}
 }

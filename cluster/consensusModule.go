@@ -216,6 +216,7 @@ func (cm *ConsensusModule) startElection() {
 // Expects cm.mu to be locked.
 func (cm *ConsensusModule) StartLeader() {
 	cm.state = Leader
+	cm.nodeInstance.IsLeader = true
 	cm.dlog("becomes Leader; term=%d, log=%v", cm.currentTerm, cm.log)
 
 	go func() {
@@ -282,6 +283,7 @@ func (cm *ConsensusModule) leaderSendHeartbeats() {
 func (cm *ConsensusModule) becomeFollower(term int) {
 	cm.dlog("becomes Follower with term=%d; log=%v", term, cm.log)
 	cm.state = Follower
+	cm.nodeInstance.IsLeader = false
 	cm.currentTerm = term
 	cm.votedFor = -1
 	cm.electionResetEvent = time.Now()

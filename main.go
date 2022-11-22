@@ -21,7 +21,7 @@ func main() {
 	wg.Wait()
 
 	wg.Add(1)
-	cm := cluster.NewConsensusModule()
+	cm := cluster.GetConsensusModule()
 	//if leader start http server, and start heartBeats, else tcp server for replication
 	if !node.IsLeader {
 		cm.ListenOnTCP()

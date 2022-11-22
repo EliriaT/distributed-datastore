@@ -64,69 +64,6 @@ func (n *Node) StartServer() {
 	log.Fatal(http.ListenAndServe(n.HttpPort, n.router))
 }
 
-// func (n *Node) ListenOnTCP() {
-//
-//		listen, err := net.Listen("tcp", n.Name+n.TcpPort)
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//
-//		defer listen.Close()
-//		log.Printf("Node %s TCP server started..", n.Name)
-//		for {
-//			conn, err := listen.Accept()
-//			if err != nil {
-//				log.Fatal(err)
-//				os.Exit(1)
-//			}
-//			go n.handleTCPRequest(conn)
-//		}
-//	}
-//
-//	func (n *Node) handleTCPRequest(conn net.Conn) {
-//		var toDoCommand Command
-//
-//		buffer := make([]byte, 1024)
-//		length, err := conn.Read(buffer)
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//
-//		buffer = buffer[:length]
-//
-//		err = json.Unmarshal(buffer, &toDoCommand)
-//		if err != nil {
-//			log.Fatal(err)
-//		}
-//
-//		log.Printf("Node %d received command %+v", n.Id, toDoCommand)
-//		if toDoCommand.Action == SET {
-//			dbCommand := convertFromMapToDbCommand(toDoCommand.Payload)
-//			store.NodeDataStore.SetValue(dbCommand.Key, []byte(dbCommand.Value))
-//			conn.Write(buffer)
-//			store.NodeDataStore.PrintStoreContent()
-//		}
-//		if toDoCommand.Action == GET {
-//			dbCommand := convertFromMapToDbCommand(toDoCommand.Payload)
-//			value, err := store.NodeDataStore.GetValue(dbCommand.Key)
-//			if err != nil {
-//				dbCommand.Value = ""
-//			}
-//			dbCommand.Value = string(value)
-//			toDoCommand.Payload = dbCommand
-//			byteMsg, _ := json.Marshal(toDoCommand)
-//			conn.Write(byteMsg)
-//			store.NodeDataStore.PrintStoreContent()
-//		}
-//		if toDoCommand.Action == AppendEntry {
-//
-//		}
-//		if toDoCommand.Action == RequestVote {
-//
-//		}
-//
-//		conn.Close()
-//	}
 func (n *Node) ListenOnUDP(wg *sync.WaitGroup) {
 	var flag = make(chan int, 1500)
 	var votes []Vote
@@ -157,18 +94,29 @@ func (n *Node) ListenOnUDP(wg *sync.WaitGroup) {
 			//}
 
 			nodes, vote := unMarshalVoteOrPeersJSON(buffer)
-			if nodes == nil {
+			if nodes == nil && vote.Id != 0 {
 				fmt.Printf("%s sent this: %+v\n", addr, vote)
 				votes = append(votes, vote)
 			} else {
-				n.Peers = nodes
+				for _, peer := range nodes {
+					if peer.Id != n.Id {
+						n.Peers = append(n.Peers, peer)
+					}
+				}
 				flag <- 1
 			}
 
 			// check here if i am the leader, then send all the nodes currently available
 			// This happens if a peer was disconnected, and reconnected, started voting, but the leader will send all the peers
 			if n.IsLeader {
-				byteMsg, _ := json.Marshal(n.Peers)
+				node := Node{
+					Id:       n.Id,
+					Name:     n.Name,
+					NodeAddr: n.NodeAddr,
+					TcpPort:  n.TcpPort,
+				}
+				peers := append(n.Peers, node)
+				byteMsg, _ := json.Marshal(peers)
 				n.SendBroadCastMessageUDP(byteMsg)
 			}
 

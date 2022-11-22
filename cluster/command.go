@@ -1,6 +1,8 @@
 package cluster
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
 
 type Command struct {
 	Action  commandEnum `json:"action"`
@@ -22,18 +24,21 @@ const (
 )
 
 type AppendEntriesArgs struct {
-	Term     int `json:"term"`
-	LeaderId int `json:"leader_id"`
+	Term     int        `json:"term"`
+	LeaderId int        `json:"leader_id"`
+	Entries  []LogEntry `json:"entries"`
 
 	//PrevLogIndex int
 	//PrevLogTerm  int
-	//Entries      []LogEntry
+
 	//LeaderCommit int
 }
 
 type AppendEntriesReply struct {
 	Term    int  `json:"term"`
 	Success bool `json:"success"`
+	// This is sent back, in case a leader is realected and the leader looses peer log
+	Entries []LogEntry `json:"entries"`
 }
 
 type RequestVoteArgs struct {
@@ -74,6 +79,7 @@ func convertFromMapToRequestVoteReply(payload interface{}) RequestVoteReply {
 	if value, ok := m["vote_granted"].(bool); ok {
 		voteReply.VoteGranted = value
 	}
+
 	return voteReply
 }
 
@@ -98,11 +104,32 @@ func convertFromMapToAppendEntriesReply(payload interface{}) AppendEntriesReply 
 	m := payload.(map[string]interface{})
 
 	if term, ok := m["term"].(float64); ok {
-
+		//intTerm, _ := strconv.Atoi(term)
 		appendEntry.Term = int(term)
 	}
+
 	if success, ok := m["success"].(bool); ok {
 		appendEntry.Success = success
+	}
+	if list, ok := m["entries"].([]interface{}); ok {
+		var entries []LogEntry
+		//log.Println("Succesfully converted entries")
+		for _, elem := range list {
+			var entry LogEntry
+			var entryCommand DbCommand
+
+			mapEntry := elem.(map[string]interface{})
+
+			entry.Term = int(mapEntry["term"].(float64))
+
+			mapCommand := mapEntry["command"].(map[string]interface{})
+			entryCommand.Key = mapCommand["key"].(string)
+			entryCommand.Value = mapCommand["value"].(string)
+			entry.Command = entryCommand
+
+			entries = append(entries, entry)
+		}
+		appendEntry.Entries = entries
 	}
 	return appendEntry
 }
@@ -120,7 +147,26 @@ func convertFromMapToAppendEntriesArgs(payload interface{}) AppendEntriesArgs {
 	if leaderId, ok := m["leader_id"].(float64); ok {
 		appendEntry.LeaderId = int(leaderId)
 	}
+	if list, ok := m["entries"].([]interface{}); ok {
+		var entries []LogEntry
+		//log.Println("Succesfully converted entries")
+		for _, elem := range list {
+			var entry LogEntry
+			var entryCommand DbCommand
 
+			mapEntry := elem.(map[string]interface{})
+
+			entry.Term = int(mapEntry["term"].(float64))
+
+			mapCommand := mapEntry["command"].(map[string]interface{})
+			entryCommand.Key = mapCommand["key"].(string)
+			entryCommand.Value = mapCommand["value"].(string)
+			entry.Command = entryCommand
+
+			entries = append(entries, entry)
+		}
+		appendEntry.Entries = entries
+	}
 	return appendEntry
 }
 

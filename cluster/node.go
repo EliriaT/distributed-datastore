@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/EliriaT/distributed-datastore/config"
-	"github.com/EliriaT/distributed-datastore/store"
 	"github.com/gorilla/mux"
 	"log"
 	"math/rand"
@@ -47,7 +46,7 @@ func (n *Node) VoteLeader() Vote {
 		Id:       n.Id,
 		NodeName: n.Name,
 		NodeAddr: n.NodeAddr,
-		VoteInf:  rand.Intn(3),
+		VoteInf:  rand.Intn(n.numPeers),
 		TcpPort:  n.TcpPort,
 	}
 }
@@ -55,7 +54,7 @@ func (n *Node) VoteLeader() Vote {
 func (n *Node) SetupRouter() {
 	r := mux.NewRouter()
 	r.HandleFunc("/get/{key}", GetObject).Methods("GET")
-	r.HandleFunc("/set/{key}/{value}", SetObject).Methods("POST")
+	r.HandleFunc("/set/{key}/{value}", SetObject).Methods("GET")
 
 	n.router = r
 }
@@ -65,59 +64,69 @@ func (n *Node) StartServer() {
 	log.Fatal(http.ListenAndServe(n.HttpPort, n.router))
 }
 
-func (n *Node) ListenOnTCP() {
-
-	listen, err := net.Listen("tcp", n.Name+n.TcpPort)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer listen.Close()
-	log.Printf("Node %s TCP server started..", n.Name)
-	for {
-		conn, err := listen.Accept()
-		if err != nil {
-			log.Fatal(err)
-			os.Exit(1)
-		}
-		go n.handleTCPRequest(conn)
-	}
-}
-
-func (n *Node) handleTCPRequest(conn net.Conn) {
-	var toDoCommand Command
-
-	buffer := make([]byte, 1024)
-	length, err := conn.Read(buffer)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	buffer = buffer[:length]
-
-	err = json.Unmarshal(buffer, &toDoCommand)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("Node %d received command %+v", n.Id, toDoCommand)
-	if toDoCommand.CommandType == SET {
-		store.NodeDataStore.SetValue(toDoCommand.Key, []byte(toDoCommand.Value))
-		conn.Write(buffer)
-	}
-	if toDoCommand.CommandType == GET {
-		value, err := store.NodeDataStore.GetValue(toDoCommand.Key)
-		if err != nil {
-			toDoCommand.Value = ""
-		}
-		toDoCommand.Value = string(value)
-		byteMsg, _ := json.Marshal(toDoCommand)
-		conn.Write(byteMsg)
-	}
-	store.NodeDataStore.PrintStoreContent()
-
-	conn.Close()
-}
+// func (n *Node) ListenOnTCP() {
+//
+//		listen, err := net.Listen("tcp", n.Name+n.TcpPort)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		defer listen.Close()
+//		log.Printf("Node %s TCP server started..", n.Name)
+//		for {
+//			conn, err := listen.Accept()
+//			if err != nil {
+//				log.Fatal(err)
+//				os.Exit(1)
+//			}
+//			go n.handleTCPRequest(conn)
+//		}
+//	}
+//
+//	func (n *Node) handleTCPRequest(conn net.Conn) {
+//		var toDoCommand Command
+//
+//		buffer := make([]byte, 1024)
+//		length, err := conn.Read(buffer)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		buffer = buffer[:length]
+//
+//		err = json.Unmarshal(buffer, &toDoCommand)
+//		if err != nil {
+//			log.Fatal(err)
+//		}
+//
+//		log.Printf("Node %d received command %+v", n.Id, toDoCommand)
+//		if toDoCommand.Action == SET {
+//			dbCommand := convertFromMapToDbCommand(toDoCommand.Payload)
+//			store.NodeDataStore.SetValue(dbCommand.Key, []byte(dbCommand.Value))
+//			conn.Write(buffer)
+//			store.NodeDataStore.PrintStoreContent()
+//		}
+//		if toDoCommand.Action == GET {
+//			dbCommand := convertFromMapToDbCommand(toDoCommand.Payload)
+//			value, err := store.NodeDataStore.GetValue(dbCommand.Key)
+//			if err != nil {
+//				dbCommand.Value = ""
+//			}
+//			dbCommand.Value = string(value)
+//			toDoCommand.Payload = dbCommand
+//			byteMsg, _ := json.Marshal(toDoCommand)
+//			conn.Write(byteMsg)
+//			store.NodeDataStore.PrintStoreContent()
+//		}
+//		if toDoCommand.Action == AppendEntry {
+//
+//		}
+//		if toDoCommand.Action == RequestVote {
+//
+//		}
+//
+//		conn.Close()
+//	}
 func (n *Node) ListenOnUDP(wg *sync.WaitGroup) {
 	var votes []Vote
 	votes = make([]Vote, 0, 3)

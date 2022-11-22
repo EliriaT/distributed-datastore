@@ -22,7 +22,7 @@ func GetShardAndReplica(key string) (originalShard Node, replicaShard Node) {
 		replicaID = hasher.Hash(key) + 1
 	}
 
-	log.Printf("For key %s, the original and replica nodes are: %d, %d", originalKey, originalID, replicaID)
+	log.Printf("For key \"  %s \" the original and replica nodes are: %d, %d", originalKey, originalID, replicaID)
 
 	originalShard, err := SearchForPeerById(originalID)
 	//log.Println("Id is : ", originalShard)

@@ -248,6 +248,7 @@ func (cm *ConsensusModule) StartLeader() {
 
 	cm.nodeInstance.SetupRouter()
 	go cm.nodeInstance.StartServer()
+	go StartWebSocketServer()
 }
 
 func (cm *ConsensusModule) leaderSendHeartbeats() {

@@ -12,7 +12,9 @@ import (
 	"time"
 )
 
-const DebugCM = true
+var cmInstance *ConsensusModule
+
+const DebugCM = false
 
 type CMState int
 
@@ -39,8 +41,8 @@ func (s CMState) String() string {
 }
 
 type LogEntry struct {
-	Command interface{}
-	Term    int
+	Command DbCommand `json:"command"`
+	Term    int       `json:"term"`
 }
 
 // ConsensusModule (CM) implements a single node of Raft consensus.
@@ -54,7 +56,9 @@ type ConsensusModule struct {
 	// Persistent Raft state on all servers
 	currentTerm int
 	votedFor    int
-	log         []LogEntry
+	LeaderLog   []LogEntry
+	myLog       []LogEntry
+	peerLogs    [][]LogEntry
 
 	// Volatile Raft state on all servers
 	state              CMState
@@ -62,27 +66,32 @@ type ConsensusModule struct {
 }
 
 // NewConsensusModule creates a new CM with the current node instance embedded
-func NewConsensusModule() *ConsensusModule {
-	cm := new(ConsensusModule)
-	cm.nodeInstance = GetNode()
+func GetConsensusModule() *ConsensusModule {
+	if cmInstance == nil {
+		cmInstance = new(ConsensusModule)
+		cmInstance.nodeInstance = GetNode()
+		cmInstance.myLog = make([]LogEntry, 0, 100)
+		cmInstance.LeaderLog = make([]LogEntry, 0, 100)
+		cmInstance.peerLogs = make([][]LogEntry, cmInstance.nodeInstance.numPeers, 10)
 
-	// All the servers first start in the Follower state in Raft protocol,  but in my adaptation, firstly the leader is elected already
-	if cm.nodeInstance.IsLeader == true {
-		cm.state = Leader
-	} else {
-		cm.state = Follower
+		// All the servers first start in the Follower state in Raft protocol,  but in my adaptation, firstly the leader is elected already
+		if cmInstance.nodeInstance.IsLeader == true {
+			cmInstance.state = Leader
+		} else {
+			cmInstance.state = Follower
+		}
+
+		// all nodes will start the election timer, but the node which is the leader, will see that he is the leader and will stop the for loop
+		go func() {
+
+			cmInstance.mu.Lock()
+			cmInstance.electionResetEvent = time.Now()
+			cmInstance.mu.Unlock()
+			cmInstance.runElectionTimer()
+		}()
 	}
 
-	// all nodes will start the election timer, but the node which is the leader, will see that he is the leader and will stop the for loop
-	go func() {
-
-		cm.mu.Lock()
-		cm.electionResetEvent = time.Now()
-		cm.mu.Unlock()
-		cm.runElectionTimer()
-	}()
-
-	return cm
+	return cmInstance
 }
 
 // electionTimeout generates a pseudo-random election timeout duration. All nodes have different election timeout
@@ -151,7 +160,7 @@ func (cm *ConsensusModule) startElection() {
 	cm.electionResetEvent = time.Now()
 	// the node will vote for itself
 	cm.votedFor = cm.nodeInstance.Id
-	cm.dlog("becomes Candidate (currentTerm=%d); log=%v", savedCurrentTerm, cm.log)
+	cm.dlog("becomes Candidate (currentTerm=%d); log=%v", savedCurrentTerm, cm.myLog)
 
 	votesReceived := 1
 
@@ -217,7 +226,7 @@ func (cm *ConsensusModule) startElection() {
 func (cm *ConsensusModule) StartLeader() {
 	cm.state = Leader
 	cm.nodeInstance.IsLeader = true
-	cm.dlog("becomes Leader; term=%d, log=%v", cm.currentTerm, cm.log)
+	cm.dlog("becomes Leader; term=%d, log=%v", cm.currentTerm, cm.myLog)
 
 	go func() {
 		ticker := time.NewTicker(50 * time.Millisecond)
@@ -239,6 +248,7 @@ func (cm *ConsensusModule) StartLeader() {
 
 	cm.nodeInstance.SetupRouter()
 	go cm.nodeInstance.StartServer()
+	go StartWebSocketServer()
 }
 
 func (cm *ConsensusModule) leaderSendHeartbeats() {
@@ -252,6 +262,7 @@ func (cm *ConsensusModule) leaderSendHeartbeats() {
 		args := AppendEntriesArgs{
 			Term:     savedCurrentTerm,
 			LeaderId: cm.nodeInstance.Id,
+			Entries:  cm.peerLogs[peer.Id-1],
 		}
 
 		toDoCommand := Command{
@@ -267,12 +278,18 @@ func (cm *ConsensusModule) leaderSendHeartbeats() {
 				cm.mu.Lock()
 				defer cm.mu.Unlock()
 
-				//reply if of Command type
+				//reply is of Command type
 				appendEntryReply := convertFromMapToAppendEntriesReply(reply.Payload)
+
 				if appendEntryReply.Term > savedCurrentTerm {
 					cm.dlog("term out of date in heartbeat reply")
 					cm.becomeFollower(appendEntryReply.Term)
 					return
+				}
+
+				if appendEntryReply.Success == false {
+					cm.dlog("leader drags recents logs from follower %v", appendEntryReply.Entries)
+					cm.peerLogs[peer.Id-1] = appendEntryReply.Entries
 				}
 			}
 		}(peer)
@@ -281,7 +298,7 @@ func (cm *ConsensusModule) leaderSendHeartbeats() {
 
 // The election timer is again started
 func (cm *ConsensusModule) becomeFollower(term int) {
-	cm.dlog("becomes Follower with term=%d; log=%v", term, cm.log)
+	cm.dlog("becomes Follower with term=%d; log=%v", term, cm.myLog)
 	cm.state = Follower
 	cm.nodeInstance.IsLeader = false
 	cm.currentTerm = term
@@ -329,8 +346,16 @@ func (cm *ConsensusModule) handleTCPRequest(conn net.Conn) {
 
 	//log.Printf("Node %d received command %+v", cm.nodeInstance.Id, toDoCommand)
 	if toDoCommand.Action == SET {
+		var logEntry LogEntry
+		cm.mu.Lock()
+		logEntry.Term = cm.currentTerm
+		cm.mu.Unlock()
 		dbCommand := convertFromMapToDbCommand(toDoCommand.Payload)
+		logEntry.Command = dbCommand
+
 		store.NodeDataStore.SetValue(dbCommand.Key, []byte(dbCommand.Value))
+
+		cm.myLog = append(cm.myLog, logEntry)
 		conn.Write(buffer)
 		store.NodeDataStore.PrintStoreContent()
 	}
@@ -421,11 +446,54 @@ func (cm *ConsensusModule) AppendEntries(args AppendEntriesArgs) (AppendEntriesR
 		}
 		cm.electionResetEvent = time.Now()
 		reply.Success = true
+
+		if len(cm.myLog) < len(args.Entries) {
+			for i := len(cm.myLog); i < len(args.Entries); i++ {
+				cm.ExecuteLogEntry(args.Entries[i])
+			}
+			//because i allowed a node with less logs to participate in election
+			//or a reelected node, has empty logs of individual ones
+			// this may happen, but then it should return back the actual logs
+		} else if len(cm.myLog) > len(args.Entries) {
+			reply.Success = false
+			reply.Entries = cm.myLog
+			//log.Println("---------Impossible, why this happened.?")
+		}
+
 	}
 
 	reply.Term = cm.currentTerm
 	cm.dlog("AppendEntries reply: %+v", reply)
 	return reply, nil
+}
+
+// Only the leader will add log entries. Also it will keep track of other nodes logs
+func (cm *ConsensusModule) AddLogEntry(originalNodeId int, replicaNodeId int, command DbCommand) {
+	var logEntry LogEntry
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	logEntry.Term = cm.currentTerm
+	logEntry.Command = command
+
+	cm.LeaderLog = append(cm.LeaderLog, logEntry)
+
+	if cm.nodeInstance.Id == originalNodeId || cm.nodeInstance.Id == replicaNodeId {
+		cm.dlog("AppendEntries: %+v", cm.myLog)
+		cm.myLog = append(cm.myLog, logEntry)
+	}
+	if cm.nodeInstance.Id != originalNodeId {
+		cm.peerLogs[originalNodeId-1] = append(cm.peerLogs[originalNodeId-1], logEntry)
+	}
+	if cm.nodeInstance.Id != replicaNodeId {
+		cm.peerLogs[replicaNodeId-1] = append(cm.peerLogs[replicaNodeId-1], logEntry)
+	}
+}
+
+func (cm *ConsensusModule) ExecuteLogEntry(entry LogEntry) {
+	dbCommand := entry.Command
+	store.NodeDataStore.SetValue(dbCommand.Key, []byte(dbCommand.Value))
+
+	cm.myLog = append(cm.myLog, entry)
 }
 
 //TODO USE SOCKETS FOR CM COMMUNICATION BETWEEN THEMSELVES

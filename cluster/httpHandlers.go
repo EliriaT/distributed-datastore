@@ -57,9 +57,12 @@ func GetObject(w http.ResponseWriter, r *http.Request) {
 			value = []byte(dbCommand.Value)
 		}
 	} else {
-		receivedCommand, _ := SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		var dbCommand DbCommand
+		receivedCommand, err := SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		if err == nil {
+			dbCommand = convertFromMapToDbCommand(receivedCommand.Payload)
+		}
 
-		dbCommand := convertFromMapToDbCommand(receivedCommand.Payload)
 		if dbCommand.Value == "" {
 			receivedCommand, err = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
 			if err != nil {
@@ -116,16 +119,21 @@ func SetObject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originalNode, replicaNode := GetShardAndReplica(key)
+	GetConsensusModule().AddLogEntry(originalNode.Id, replicaNode.Id, peersCommand)
 
+	var err1, err2 error
 	if originalNode.Id == GetNode().Id {
 		store.NodeDataStore.SetValue(key, []byte(value))
-		SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+		_, err1 = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
 	} else if replicaNode.Id == GetNode().Id {
 		store.NodeDataStore.SetValue(key, []byte(value))
-		SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		_, err2 = SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
 	} else {
-		SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
-		SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+		_, err1 = SendTCPRequest(byteMsg, originalNode.Name+originalNode.TcpPort)
+		_, err2 = SendTCPRequest(byteMsg, replicaNode.Name+replicaNode.TcpPort)
+	}
+	if (err1 == nil && err2 == nil) || (err1 != nil && err2 == nil) || (err1 == nil && err2 != nil) {
+		commandChan <- peersCommand
 	}
 
 	store.NodeDataStore.PrintStoreContent()
